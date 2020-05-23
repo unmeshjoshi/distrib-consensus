@@ -12,8 +12,6 @@ class KVStore(walDir:File) {
 
   def put(key:String, value:String): Unit = {
     wal.writeEntry(SetValueCommand(key, value).serialize())
-
-    kv.put(key, value)
   }
 
   def get(key: String): Option[String] = kv.get(key)
@@ -23,11 +21,15 @@ class KVStore(walDir:File) {
   }
 
 
-  def applyLog() = {
-    val entries: ListBuffer[WalEntry] = wal.readAll()
+  def applyEntries(entries:List[WalEntry]): Unit = {
     entries.foreach(entry ⇒ {
       val command = SetValueCommand.deserialize(new ByteArrayInputStream(entry.data))
       kv.put(command.key, command.value)
     })
+  }
+
+  def applyLog() = {
+    val entries: List[WalEntry] = wal.readAll().toList
+    applyEntries(entries)
   }
 }

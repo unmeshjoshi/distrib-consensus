@@ -10,7 +10,7 @@ class Elector(noOfServers: Int) extends Logging {
     val max: (Vote, Int) = voteCounts.maxBy(tuple ⇒ tuple._2)
 
     votes.values.foreach(v ⇒ {
-      if (v.zxid > result.vote.zxid || (v.zxid == result.vote.zxid && v.id > result.vote.id)) {
+      if (v.lastLogIndex > result.vote.lastLogIndex || (v.lastLogIndex == result.vote.lastLogIndex && v.id > result.vote.id)) {
         result = result.copy(vote = v, count = 1)
       }
     })

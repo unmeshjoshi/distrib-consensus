@@ -30,6 +30,8 @@ object WriteAheadLog {
 }
 
 class WriteAheadLog(fileChannel:FileChannel) {
+  var highWaterMark: Long = 0
+
   def truncate(logIndex: Long) = {
     val filePosition: Option[Long] = entryOffsets.get(logIndex)
     filePosition.map(position ⇒ {

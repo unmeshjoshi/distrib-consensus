@@ -1,3 +1,3 @@
 package com.dist.consensus.election
 
-case class Vote(id: Long, zxid: Long)
+case class Vote(id: Long, lastLogIndex: Long)
