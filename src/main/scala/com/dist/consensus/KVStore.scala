@@ -27,8 +27,7 @@ class KVStore(walDir:File) {
     val entries: ListBuffer[WalEntry] = wal.readAll()
     entries.foreach(entry ⇒ {
       val command = SetValueCommand.deserialize(new ByteArrayInputStream(entry.data))
-      kv.put(command.key, command.value
-      )
+      kv.put(command.key, command.value)
     })
   }
 }
