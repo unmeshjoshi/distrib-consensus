@@ -35,6 +35,7 @@ class TcpListener(localEp: InetAddressAndPort, handler: RequestOrResponse ⇒ Re
   var serverSocket: ServerSocket = null
 
   def shudown() = {
+    isRunning.set(false)
     Utils.swallow(serverSocket.close())
   }
 

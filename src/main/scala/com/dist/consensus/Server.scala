@@ -14,18 +14,40 @@ object ServerState extends Enumeration {
 }
 
 class Server(config: Config) extends Thread with Logging {
+  def shutdown(): Any = {
+    leader.followerProxies.foreach(p => p.stop())
+
+  }
+
   var commitIndex = 0L
 
   var leader:Leader = _
 
   val kv = new KVStore(config.walDir)
+  val electionTimeoutChecker = new HeartBeatScheduler(heartBeatCheck)
 
+  def handleHeartBeatTimeout() = {
+    info(s"Heartbeat timeout starting election in ${config.serverId}")
+    this.state == ServerState.LOOKING
+  }
+
+  var heartBeatReceived = false
+  def heartBeatCheck() = {
+    info(s"Checking if heartbeat received in ${state} ${config.serverId}")
+    if(!heartBeatReceived) {
+      handleHeartBeatTimeout()
+    } else {
+      heartBeatReceived = false //reset
+    }
+  }
 
   @volatile var running = true
   private val client = new NetworkClient()
 
 
   def handleAppendEntries(appendEntryRequest: AppendEntriesRequest) = {
+    heartBeatReceived = true
+
     val lastLogEntry = this.kv.wal.lastLogEntryId
     if (appendEntryRequest.data.size == 0) { //this is heartbeat
       updateCommitIndex(appendEntryRequest)
@@ -76,7 +98,10 @@ class Server(config: Config) extends Thread with Logging {
     applyEntries(entries)
   }
 
-  def startListening() = new TcpListener(config.serverAddress, requestHandler).start()
+  val listener = new TcpListener(config.serverAddress, requestHandler)
+  def startListening() = {
+    listener.start()
+  }
 
   val currentVote = new AtomicReference(Vote(config.serverId, kv.wal.lastLogEntryId))
 
@@ -103,6 +128,7 @@ class Server(config: Config) extends Thread with Logging {
       if (state == ServerState.LOOKING) {
         try {
           val electionResult = new LeaderElector(config, this, config.getPeers()).lookForLeader()
+          electionTimeoutChecker.cancel()
         } catch {
           case e: Exception ⇒ {
             e.printStackTrace()
@@ -110,10 +136,13 @@ class Server(config: Config) extends Thread with Logging {
           }
         }
       } else if (state == ServerState.LEADING) {
+        electionTimeoutChecker.cancel()
         this.leader = new Leader(config, new NetworkClient(), this)
         this.leader.startLeading()
 
       } else if (state == ServerState.FOLLOWING) {
+        electionTimeoutChecker.cancel()
+        electionTimeoutChecker.startWithRandomInterval()
         startFollowing()
       }
     }
@@ -122,6 +151,7 @@ class Server(config: Config) extends Thread with Logging {
       while(this.state == ServerState.FOLLOWING) {
         Thread.sleep(100)
       }
+      info(s"Giving up follower state in ${config.serverId}")
     }
   }
 }
@@ -131,9 +161,9 @@ case class AppendEntriesRequest(xid:Long, data:Array[Byte], commitIndex:Long)
 case class AppendEntriesResponse(xid:Long, success:Boolean)
 
 class Leader(config:Config, client:NetworkClient, val self:Server) extends Logging {
-  val peerProxies = config.getPeers().map(p ⇒ PeerProxy(p, 0, sendHeartBeat))
+  val followerProxies = config.getPeers().map(p ⇒ PeerProxy(p, 0, sendHeartBeat))
   def startLeading() = {
-    peerProxies.foreach(_.start())
+    followerProxies.foreach(_.start())
     while(self.state == ServerState.LEADING) {
       Thread.sleep(100)
     }
@@ -153,7 +183,7 @@ class Leader(config:Config, client:NetworkClient, val self:Server) extends Loggi
     }
   }
 
-  def stopLeading() = peerProxies.foreach(_.stop())
+  def stopLeading() = followerProxies.foreach(_.stop())
 
   var lastEntryId: Long = self.kv.wal.lastLogEntryId
 
@@ -167,7 +197,7 @@ class Leader(config:Config, client:NetworkClient, val self:Server) extends Loggi
   }
 
   private def findMaxIndexWithQuorum = {
-    val matchIndexes = peerProxies.map(p ⇒ p.matchIndex)
+    val matchIndexes = followerProxies.map(p ⇒ p.matchIndex)
     val sorted: Seq[Long] = matchIndexes.sorted
     val matchIndexAtQuorum = sorted((config.peerConfig.size - 1) / 2)
     matchIndexAtQuorum
@@ -177,7 +207,7 @@ class Leader(config:Config, client:NetworkClient, val self:Server) extends Loggi
     val request = appendEntriesRequestFor(data)
 
     //TODO: Happens synchronously for demo. Has to be async with each peer having its own thread
-    peerProxies.map(peer ⇒ {
+    followerProxies.map(peer ⇒ {
       val response = client.sendReceive(request, peer.peerInfo.address)
       val appendEntriesResponse = JsonSerDes.deserialize(response.messageBodyJson.getBytes(), classOf[AppendEntriesResponse])
 
