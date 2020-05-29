@@ -1,7 +1,11 @@
 package com.dist.consensus
 
+import java.time.Duration
+
 import com.dist.consensus.network.{Config, InetAddressAndPort, Peer}
 import org.scalatest.FunSuite
+import scala.concurrent.duration._
+import scala.concurrent.Await
 
 class ConsensusTest extends FunSuite {
 
@@ -36,8 +40,8 @@ class ConsensusTest extends FunSuite {
         peer3.state == ServerState.LEADING && peer1.state == ServerState.FOLLOWING && peer2.state == ServerState.FOLLOWING
       }, "Waiting for leader to be selected")
 
-      peer3.put("k1", "v1")
-
+      val future = peer3.put("k1", "v1")
+      Await.ready(future, 5.second)
       val value = peer3.get("k1")
       assert(value == Some("v1"))
     }

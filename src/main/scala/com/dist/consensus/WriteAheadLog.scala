@@ -47,18 +47,19 @@ class WriteAheadLog(fileChannel:FileChannel) {
 
   var lastLogEntryId = 0L
 
-  def writeEntry(bytes: Array[Byte]):Long = {
+  //should be used only on leader.
+  def writeEntry(bytes: Array[Byte], entryType: Int = EntryType.data):Long = {
     val logEntryId = lastLogEntryId + 1
-    val logEntry = WalEntry(logEntryId, bytes)
-    val filePosition = writeEntry(logEntry)
-    lastLogEntryId = logEntryId
-    entryOffsets.put(logEntryId, filePosition)
-    logEntryId
+    val logEntry = WalEntry(logEntryId, bytes, entryType, System.nanoTime())
+    writeEntry(logEntry)
   }
 
-  private def writeEntry(logEntry:WalEntry):Long = {
+  def writeEntry(logEntry:WalEntry):Long = {
     val buffer = logEntry.serialize()
-    writeToChannel(buffer)
+    val filePosition = writeToChannel(buffer)
+    lastLogEntryId = logEntry.entryId
+    entryOffsets.put(logEntry.entryId, filePosition)
+    lastLogEntryId
   }
 
   private def writeToChannel(buffer: ByteBuffer) = {

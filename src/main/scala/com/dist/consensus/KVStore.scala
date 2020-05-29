@@ -23,9 +23,18 @@ class KVStore(walDir:File) {
 
   def applyEntries(entries:List[WalEntry]): Unit = {
     entries.foreach(entry ⇒ {
+      applyEntry(entry)
+    })
+  }
+
+  def applyEntry(entry: WalEntry) = {
+    if (entry.entryType == EntryType.data) {
       val command = SetValueCommand.deserialize(new ByteArrayInputStream(entry.data))
       kv.put(command.key, command.value)
-    })
+      command.value
+    } else if (entry.entryType == EntryType.clientRegistration) {
+
+    }
   }
 
   def applyLog() = {

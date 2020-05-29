@@ -27,34 +27,41 @@ class LeaderElector(config:Config, self:Server, peers:List[Peer]) extends Loggin
         }
 
         info(s"${config.serverId} Waiting for leader to be selected: " + votes)
-        Thread.sleep(1000)
-
       }
     }
   }
 
   private def getVotesFromPeers() = {
     val votes = new java.util.HashMap[InetAddressAndPort, Vote]
+    votes.put(config.serverAddress, selfVote())
     peers.foreach(peer ⇒ {
+      try {
       val request = VoteRequest(config.serverId, self.kv.wal.lastLogEntryId)
       val voteRequest = RequestOrResponse(RequestKeys.RequestVoteKey, JsonSerDes.serialize(request), 0)
       val response = client.sendReceive(voteRequest, peer.address)
       val maybeVote = JsonSerDes.deserialize(response.messageBodyJson.getBytes(), classOf[VoteResponse])
       votes.put(peer.address, Vote(maybeVote.serverId, maybeVote.lastXid))
+      } catch {
+        case e:Exception => logger.error(e)
+      }
     })
     votes
   }
 
+
+  private def selfVote() = {
+    self.currentVote.get()
+  }
 
   private def setLeaderOrFollowerState(electionResult: ElectionResult) = {
     //set state as leader
     self.currentVote.set(electionResult.winningVote)
     if (electionResult.winningVote.id == config.serverId) {
       info(s"Setting ${electionResult.winningVote.id} to be leader")
-      self.setPeerState(ServerState.LEADING)
+      self.transitionTo(ServerState.LEADING)
     } else {
       info(s"Setting ${config.serverId} to be follower of ${electionResult.winningVote.id}")
-      self.setPeerState(ServerState.FOLLOWING)
+      self.transitionTo(ServerState.FOLLOWING)
     }
   }
 
