@@ -4,8 +4,12 @@ import java.io.{ByteArrayInputStream, File}
 
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
-
 import java.util
+import java.util.concurrent.TimeUnit
+import java.util.stream.Collectors
+import java.util.{Map, stream}
+
+import akka.util.Timeout
 
 case class ClientSession(lastModifiedTime: Long, clientId: String, responses: util.Map[Int, String]) {
 
@@ -40,21 +44,23 @@ class KVStore(walDir: File) {
     if (entry.entryType == EntryType.data) {
       val command = Command.deserialize(new ByteArrayInputStream(entry.data))
       command match {
-        case command: SetValueCommand => {
-          if (command.clientId.isEmpty) {
-            kv.put(command.key, command.value)
+        case setValueCommand: SetValueCommand => {
+          if (setValueCommand.clientId.isEmpty) {
+            kv.put(setValueCommand.key, setValueCommand.value)
           } else {
-            mayBeRespondFromSession(entry, command)
+            mayBeRespondFromSession(entry, setValueCommand)
           }
         }
-        case command: RegisterClientCommand => {
-          val clientId = if (command.clientId.isEmpty) s"${entry.entryId}" else command.clientId
+        case registerClientCommand: RegisterClientCommand => {
+          val clientId = if (registerClientCommand.clientId.isEmpty) s"${entry.entryId}" else registerClientCommand.clientId
           sessions.put(clientId, new ClientSession(entry.leaderTime, clientId, new util.HashMap[Int, String]()))
           clientId
         }
       }
     }
   }
+
+  val sessionTimeoutNanos = TimeUnit.SECONDS.toNanos(1)
 
   private def mayBeRespondFromSession(entry: WalEntry, command: SetValueCommand): String = {
     val session = sessions.get(command.clientId)
@@ -75,5 +81,17 @@ class KVStore(walDir: File) {
   def applyLog() = {
     val entries: List[WalEntry] = wal.readAll().toList
     applyEntries(entries)
+  }
+
+  def expireSessions(clusterTime: Long) = {
+    val entriesToExpire = sessions.entrySet().stream().filter(entry => {
+      val session = entry.getValue
+      val expireTime = session.lastModifiedTime + sessionTimeoutNanos
+      expireTime < clusterTime
+    }).collect(Collectors.toList())
+
+    entriesToExpire.stream().forEach(entry => {
+      sessions.remove(entry.getKey)
+    })
   }
 }

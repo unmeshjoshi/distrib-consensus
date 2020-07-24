@@ -75,7 +75,33 @@ class KVStoreTest extends FunSuite {
 
     assert(firstValue == secondValue)
     assert(firstValue != thirdValue)
+  }
 
+  test("should expire session based on cluster time") {
+    val walDir = TestUtils.tempDir("sessionstest")
+    val kv = new KVStore(walDir)
+
+    val command = RegisterClientCommand("client1")
+    val entryId = 1
+    val walEntry = WalEntry(entryId, command.serialize())
+    val clientId = kv.applyEntry(walEntry)
+
+    val command2 = RegisterClientCommand("client2")
+    val entryId2 = 2
+    val walEntry2 = WalEntry(entryId2, command2.serialize())
+    val clientId2 = kv.applyEntry(walEntry2)
+
+    val clusterClock = new ClusterClock(new SystemClock())
+    val newEpoch = clusterClock.interpolate()
+    clusterClock.newEpoch(newEpoch)
+
+    TestUtils.waitUntilTrue(()=> {
+      kv.expireSessions(clusterClock.leaderStamp())
+      kv.sessions.size() == 0
+    }, "waiting for sessions to be expired", 1000, 100)
+
+
+    assert(kv.sessions.size() == 0)
   }
 
 }
